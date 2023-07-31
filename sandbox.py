@@ -18,16 +18,18 @@ import torch.nn as nn
 import datetime
 import transformer_timeseries as tst
 import numpy as np
-from tqdm import tqdm
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Hyperparams
 test_size = 0.1
 batch_size = 48
-target_col_name = "FCR_N_PriceEUR"  # "elevation_profile2"
-timestamp_col = "timestamp"  # "Zeit" #
+target_col_name = "elevation_profile2"  # "FCR_N_PriceEUR"  #
+timestamp_col = "Zeit"  # "timestamp"  #
 # Only use data from this date and onwards
-cutoff_date = datetime.datetime(2017, 1, 1)
+# cutoff_date = datetime.datetime(2017, 1, 1)
 
 # Params
 dim_val = 512
@@ -47,17 +49,20 @@ max_seq_len = enc_seq_len
 batch_first = False
 
 # Define input variables
-exogenous_vars = []  # should contain strings. Each string must correspond to a column name
+exogenous_vars = ["Spannung_PL (2)", "Strom_PL (3)", "Drahtvorschub", "angelegte Spannung", "angelegter Drahvorschub", "Spritzabstand",
+                  "Robotergeschwindigkeit", "ZerstÃ¤ubergasmenge"]  # should contain strings. Each string must correspond to a column name
 input_variables = [target_col_name] + exogenous_vars
 target_idx = 0  # index position of target in batched trg_y
 
 input_size = len(input_variables)
-
+print()
 # Read data
 data = utils.read_data(timestamp_col_name=timestamp_col)
 
 # Remove test data from dataset
-training_data = data[:-(round(len(data)*test_size))]
+training_data = data[:]
+print("training_data1")
+print(training_data)
 
 # Make list of (start_idx, end_idx) pairs that are used to slice the time series sequence into chunkc.
 # Should be training data indices only
@@ -74,9 +79,20 @@ training_data = ds.TransformerDataset(
     dec_seq_len=dec_seq_len,
     target_seq_len=output_sequence_length
 )
+"""training_data = ds.TransformerDataset(
+    data=torch.tensor(training_data[target_col_name].values).float(
+    ).unsqueeze(-1),  # Add an extra dimension for consistency
+    indices=training_indices,
+    enc_seq_len=enc_seq_len,
+    dec_seq_len=dec_seq_len,
+    target_seq_len=output_sequence_length
+)"""
 
+
+print(training_data)
 # Making dataloader
 training_data = DataLoader(training_data, batch_size)
+
 
 # i, batch = next(enumerate(training_data))
 
@@ -93,16 +109,12 @@ model = tst.TimeSeriesTransformer(
     num_predicted_features=1
 )
 
+model = model.to(device)
 
-# output = model(
-#   src=src,
-#  tgt=trg,
-# src_mask=src_mask,
-# tgt_mask=tgt_mask
-# )
+
 # Loss and Optimizer
 learning_rate = 0.01
-n_epochs = 1000
+n_epochs = 10
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, eps=1e-9)
 
@@ -115,14 +127,23 @@ src_mask = utils.generate_square_subsequent_mask(
 
 # Make tgt mask for decoder with size:
 # [batch_size*n_heads, output_sequence_length, output_sequence_length]
-tgt_mask = utils.generate_square_subsequent_mask(
+trg_mask = utils.generate_square_subsequent_mask(
     dim1=output_sequence_length,
     dim2=output_sequence_length
 )
+src_mask = src_mask.to(device)
+trg_mask = trg_mask.to(device)
+
 
 # Training Loop
 for epoch in range(n_epochs):
-    for i, (src, trg, tgt_y) in enumerate(training_data):
+    print(epoch)
+
+    for i, (src, trg, trg_y) in enumerate(training_data):
+
+        src = src.to(device)  # Move inputs to GPU
+        trg = trg.to(device)
+        trg_y = trg_y.to(device)
         if batch_first == False:
 
             # shape_before = src.shape
@@ -134,13 +155,18 @@ for epoch in range(n_epochs):
             trg = trg.permute(1, 0, 2)
             # print("src shape changed from {} to {}".format(
             #   shape_before, src.shape))
+            print(trg)
 
         # Make forecasts
-        prediction = model(src, trg, src_mask, tgt_mask)
-        # tgt_y = tgt_y.unsqueeze(1)
+        print(trg.shape)
+        prediction = model(src, trg, src_mask, trg_mask)
+        # prediction = prediction.squeeze(2)
+
+        print('Shape of target (tgt_y): ', trg_y.shape)
+        print('Shape of prediction: ', prediction.shape)
 
         # Compute and backprop loss
-        loss = loss_fn(tgt_y, prediction)
+        loss = loss_fn(trg_y, prediction)
 
         loss.backward()
 
@@ -149,39 +175,10 @@ for epoch in range(n_epochs):
 
         optimizer.zero_grad()
 
-        """ # Make forecasts
-    y_predicted = model(
-        src=src,
-        tgt=trg,
-        src_mask=src_mask,
-        tgt_mask=tgt_mask
-    )  # ??=output?
-
-    # Compute and backprop loss
-    l = loss_fn(trg_y, y_predicted)
-
-    l.backward()
-
-    # Take optimizer step
-    optimizer.step()
-
-    # predcit = forward pass with our model
-
-    # loss
-   # l = loss_fn(trg_y, y_predicted)
-
-    # calculategradient = backward_pass
-    # l.backward()
-
-    # update weights
-   # optimizer.step()
-
-    # zero the gradients after updating
-    # optimizer.zero_grad(set_to_none=True)"""
-
         if (epoch+1) % 10 == 0:
             w, b = model.parameters()  # unpack parameters
             print('epoch', epoch+1, ' : w=',
                   w[0][0].item(), 'loss= ', loss.item())
+        print(prediction, trg_y)
     # print(
         # f'Prediction after training: f({X_test.item()})={model(X_test).item():.3f}')
