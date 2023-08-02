@@ -26,7 +26,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Hyperparams
 test_size = 0.1
-batch_size = 30
+batch_size = 50
 target_col_name = "elevation_profile2"  # "FCR_N_PriceEUR"  #
 timestamp_col = "Zeit"  # "timestamp"  #
 # Only use data from this date and onwards
@@ -40,7 +40,7 @@ n_encoder_layers = 4
 dec_seq_len = 92  # length of input given to decoder
 enc_seq_len = 153  # length of input given to encoder
 # target sequence length. If hourly data and length = 48, you predict 2 days ahead
-output_sequence_length = 30
+output_sequence_length = 48
 # used to slice data into sub-sequences
 window_size = enc_seq_len + output_sequence_length
 step_size = 1  # Step size, i.e. how many time steps does the moving window move at each step
@@ -55,7 +55,7 @@ exogenous_vars = ["Spannung_PL (2)", "Strom_PL (3)", "Drahtvorschub", "angelegte
 input_variables = [target_col_name] + exogenous_vars
 target_idx = 0  # index position of target in batched trg_y
 
-input_size = len(input_variables)
+input_size = len(input_variables)-1
 print()
 # Read data
 data = utils.read_data(timestamp_col_name=timestamp_col)
@@ -93,7 +93,7 @@ training_data = ds.TransformerDataset(
 
 print(training_data)
 # Making dataloader
-training_data = DataLoader(training_data, batch_size)
+training_data = DataLoader(training_data, batch_size, drop_last=True)
 
 
 # i, batch = next(enumerate(training_data))
@@ -105,7 +105,7 @@ training_data = DataLoader(training_data, batch_size)
 
 
 model = tst.TimeSeriesTransformer(
-    input_size=len(input_variables),
+    input_size=input_size,
     dec_seq_len=enc_seq_len,
     batch_first=batch_first,
     num_predicted_features=1
@@ -159,7 +159,10 @@ for epoch in range(n_epochs):
             # trg = trg.permute(1, 0)  # Because trg only has two dimensions
             # print("src shape changed from {} to {}".format(
             #   shape_before, src.shape))
-
+            trg_y = trg_y.permute(1, 0, 2)
+        print('src', src)
+        print('trg', trg)
+        print("trg_y", trg_y)
         # Make forecasts
         prediction = model(src, trg, src_mask, trg_mask)
         # prediction = prediction.squeeze(2)
@@ -186,3 +189,29 @@ for epoch in range(n_epochs):
         loss_values.append(loss.item())  # Append the loss value to the list
 
 # After training, plot the loss values
+plt.figure(figsize=(10, 6))
+plt.plot(loss_values)
+plt.title('Loss during training')
+plt.xlabel('Batch')
+plt.ylabel('Loss value')
+plt.savefig('plots\loss.png')
+
+# print(
+# f'Prediction after training: f({X_test.item()})={model(X_test).item():.3f}')
+model.eval()  # Set the model to evaluation mode
+
+with torch.no_grad():  # Turn off gradients for prediction
+    predictions = model(src, trg)
+    loss = loss_fn(trg_y, predictions)
+    print('Validation Loss:', loss.item())
+
+# Detach and move to CPU for further use with matplotlib
+predictions = predictions.detach().cpu().numpy()
+trg_y = trg_y.detach().cpu().numpy()
+
+plt.figure(figsize=(10, 6))
+plt.plot(trg_y, label='Actual')
+plt.plot(predictions, label='Predicted')
+plt.legend()
+plt.title('Actual vs Predicted')
+plt.savefig('plots\actual_and_predicted.png')

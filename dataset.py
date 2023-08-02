@@ -124,7 +124,7 @@ class TransformerDataset(Dataset):
             target_seq_len, "Sequence length does not equal (input length + target length)"
 
         # encoder input
-        src = sequence[:enc_seq_len, :]
+        src = sequence[:enc_seq_len, 1:]
 
         # decoder input. As per the paper, it must have the same dimension as the
         # target sequence, and it must contain the last value of src, and all
@@ -144,4 +144,5 @@ class TransformerDataset(Dataset):
         print(trg.shape)
 
         # change size from [batch_size, target_seq_len, num_features] to [batch_size, target_seq_len]
+        # This will change the shape of trg_y to (48, 50, 1)
         return src, trg, trg_y.unsqueeze(-1)
