@@ -18,6 +18,7 @@ import torch.nn as nn
 import datetime
 import transformer_timeseries as tst
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -25,7 +26,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Hyperparams
 test_size = 0.1
-batch_size = 48
+batch_size = 30
 target_col_name = "elevation_profile2"  # "FCR_N_PriceEUR"  #
 timestamp_col = "Zeit"  # "timestamp"  #
 # Only use data from this date and onwards
@@ -33,13 +34,13 @@ timestamp_col = "Zeit"  # "timestamp"  #
 
 # Params
 dim_val = 512
-n_heads = 8
+n_heads = 4
 n_decoder_layers = 4
 n_encoder_layers = 4
 dec_seq_len = 92  # length of input given to decoder
 enc_seq_len = 153  # length of input given to encoder
 # target sequence length. If hourly data and length = 48, you predict 2 days ahead
-output_sequence_length = 48
+output_sequence_length = 30
 # used to slice data into sub-sequences
 window_size = enc_seq_len + output_sequence_length
 step_size = 1  # Step size, i.e. how many time steps does the moving window move at each step
@@ -77,7 +78,8 @@ training_data = ds.TransformerDataset(
     indices=training_indices,
     enc_seq_len=enc_seq_len,
     dec_seq_len=dec_seq_len,
-    target_seq_len=output_sequence_length
+    target_seq_len=output_sequence_length,
+    target_feature_idx=target_idx
 )
 """training_data = ds.TransformerDataset(
     data=torch.tensor(training_data[target_col_name].values).float(
@@ -133,13 +135,14 @@ trg_mask = utils.generate_square_subsequent_mask(
 )
 src_mask = src_mask.to(device)
 trg_mask = trg_mask.to(device)
-
+loss_values = []
 
 # Training Loop
 for epoch in range(n_epochs):
     print(epoch)
 
     for i, (src, trg, trg_y) in enumerate(training_data):
+        print(i)
 
         src = src.to(device)  # Move inputs to GPU
         trg = trg.to(device)
@@ -153,12 +156,11 @@ for epoch in range(n_epochs):
 
             # shape_before = trg.shape
             trg = trg.permute(1, 0, 2)
+            # trg = trg.permute(1, 0)  # Because trg only has two dimensions
             # print("src shape changed from {} to {}".format(
             #   shape_before, src.shape))
-            print(trg)
 
         # Make forecasts
-        print(trg.shape)
         prediction = model(src, trg, src_mask, trg_mask)
         # prediction = prediction.squeeze(2)
 
@@ -180,5 +182,7 @@ for epoch in range(n_epochs):
             print('epoch', epoch+1, ' : w=',
                   w[0][0].item(), 'loss= ', loss.item())
         print(prediction, trg_y)
-    # print(
-        # f'Prediction after training: f({X_test.item()})={model(X_test).item():.3f}')
+        print('Batch', i+1, 'Loss:', loss.item())
+        loss_values.append(loss.item())  # Append the loss value to the list
+
+# After training, plot the loss values

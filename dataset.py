@@ -4,19 +4,21 @@ from torch.utils.data import Dataset
 import pandas as pd
 from typing import Tuple
 
+
 class TransformerDataset(Dataset):
     """
     Dataset class used for transformer models.
-    
-    """
-    def __init__(self, 
-        data: torch.tensor,
-        indices: list, 
-        enc_seq_len: int, 
-        dec_seq_len: int, 
-        target_seq_len: int
-        ) -> None:
 
+    """
+
+    def __init__(self,
+                 data: torch.tensor,
+                 indices: list,
+                 enc_seq_len: int,
+                 dec_seq_len: int,
+                 target_seq_len: int,
+                 target_feature_idx: int  # Add this parameter
+                 ) -> None:
         """
         Args:
 
@@ -40,10 +42,12 @@ class TransformerDataset(Dataset):
             target_idx: The index position of the target variable in data. Data
                         is a 2D tensor
         """
-        
+
         super().__init__()
 
         self.indices = indices
+
+        self.target_feature_idx = target_feature_idx  # Store it in an instance variable
 
         self.data = data
 
@@ -55,10 +59,8 @@ class TransformerDataset(Dataset):
 
         self.target_seq_len = target_seq_len
 
-
-
     def __len__(self):
-        
+
         return len(self.indices)
 
     def __getitem__(self, index):
@@ -76,25 +78,24 @@ class TransformerDataset(Dataset):
 
         sequence = self.data[start_idx:end_idx]
 
-        #print("From __getitem__: sequence length = {}".format(len(sequence)))
+        # print("From __getitem__: sequence length = {}".format(len(sequence)))
 
         src, trg, trg_y = self.get_src_trg(
             sequence=sequence,
             enc_seq_len=self.enc_seq_len,
             dec_seq_len=self.dec_seq_len,
             target_seq_len=self.target_seq_len
-            )
+        )
 
         return src, trg, trg_y
-    
+
     def get_src_trg(
         self,
-        sequence: torch.Tensor, 
-        enc_seq_len: int, 
-        dec_seq_len: int, 
+        sequence: torch.Tensor,
+        enc_seq_len: int,
+        dec_seq_len: int,
         target_seq_len: int
-        ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
-
+    ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
         """
         Generate the src (encoder input), trg (decoder input) and trg_y (the target)
         sequences from a sequence. 
@@ -117,23 +118,30 @@ class TransformerDataset(Dataset):
 
             trg_y: tensor, 1D, the target sequence against which the model output
                 is compared when computing loss. 
-        
+
         """
-        assert len(sequence) == enc_seq_len + target_seq_len, "Sequence length does not equal (input length + target length)"
-        
+        assert len(sequence) == enc_seq_len + \
+            target_seq_len, "Sequence length does not equal (input length + target length)"
+
         # encoder input
-        src = sequence[:enc_seq_len] 
-        
-        # decoder input. As per the paper, it must have the same dimension as the 
+        src = sequence[:enc_seq_len, :]
+
+        # decoder input. As per the paper, it must have the same dimension as the
         # target sequence, and it must contain the last value of src, and all
         # values of trg_y except the last (i.e. it must be shifted right by 1)
-        trg = sequence[enc_seq_len-1:len(sequence)-1]
-        
-        assert len(trg) == target_seq_len, "Length of trg does not match target sequence length"
+        trg = sequence[enc_seq_len-1:len(sequence)-1, self.target_feature_idx]
+        trg = trg.unsqueeze(-1)
+       # trg = sequence[enc_seq_len-1:len(sequence)-1]
+
+        assert len(
+            trg) == target_seq_len, "Length of trg does not match target sequence length"
 
         # The target sequence against which the model output will be compared to compute loss
-        trg_y = sequence[-target_seq_len:]
+        trg_y = sequence[-target_seq_len:, self.target_feature_idx]
 
-        assert len(trg_y) == target_seq_len, "Length of trg_y does not match target sequence length"
+        assert len(
+            trg_y) == target_seq_len, "Length of trg_y does not match target sequence length"
+        print(trg.shape)
 
-        return src, trg, trg_y.squeeze(-1) # change size from [batch_size, target_seq_len, num_features] to [batch_size, target_seq_len] 
+        # change size from [batch_size, target_seq_len, num_features] to [batch_size, target_seq_len]
+        return src, trg, trg_y.unsqueeze(-1)
